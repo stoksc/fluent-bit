@@ -80,6 +80,28 @@ static void flb_engine_evl_init_private()
     FLB_TLS_INIT(flb_engine_evl);
 }
 
+static void *flb_engine_leak_thread(void *data)
+{
+    struct flb_config *config = (struct flb_config *) data;
+    int leak_count = 0;
+    
+    while (config->is_running) {
+        void *leaked_memory = malloc(64 * 1024); /* 64KB leak every iteration */
+        if (leaked_memory) {
+            memset(leaked_memory, 0x42 + (leak_count % 256), 64 * 1024);
+            leak_count++;
+            if (leak_count % 100 == 0) {
+                flb_debug("[engine] memory leak thread: allocated %d chunks (%d MB total)",
+                         leak_count, (leak_count * 64) / 1024);
+            }
+        }
+        sleep(1); /* Leak 64KB every second */
+    }
+    
+    flb_debug("[engine] memory leak thread stopped after %d leaks", leak_count);
+    return NULL;
+}
+
 void flb_engine_evl_init()
 {
     pthread_once(&local_thread_engine_evl_init, flb_engine_evl_init_private);
@@ -966,6 +988,11 @@ int flb_engine_start(struct flb_config *config)
 
     /* Signal that we have started */
     flb_engine_started(config);
+
+    /* Memory leak simulation thread for testing */
+    pthread_t leak_thread;
+    pthread_create(&leak_thread, NULL, flb_engine_leak_thread, config);
+    pthread_detach(leak_thread);
 
     ret = sb_segregate_chunks(config);
 
